@@ -1,6 +1,33 @@
 @DigitalWallet.Api_HostAddress = http://localhost:5298
 
-GET {{DigitalWallet.Api_HostAddress}}/weatherforecast/
+### 1. Get Wallet Balance
+GET {{DigitalWallet.Api_HostAddress}}/wallet/balance
 Accept: application/json
 
 ###
+
+### 2. Get All Transactions
+GET {{DigitalWallet.Api_HostAddress}}/wallet/transactions
+Accept: application/json
+
+###
+
+### 3. Create New Transaction (Income)
+POST {{DigitalWallet.Api_HostAddress}}/wallet/transactions
+Content-Type: application/json
+
+{
+  "description": "Salary",
+  "amount": 1500.00
+}
+
+###
+
+### 4. Create New Transaction (Expense)
+POST {{DigitalWallet.Api_HostAddress}}/wallet/transactions
+Content-Type: application/json
+
+{
+  "description": "Coffee",
+  "amount": -3.50
+}

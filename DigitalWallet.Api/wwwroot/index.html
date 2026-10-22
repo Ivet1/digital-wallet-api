@@ -1,0 +1,675 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --lilac: #c8b8ff;
+            --ink: #140d29;
+            --ink-2: #221845;
+            --lime: #d6ff3f;
+            --coral: #ff6b81;
+            --cream: #f7f3ff;
+            --muted: rgba(20, 13, 41, .55);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--lilac);
+            color: var(--ink);
+            font-family: 'Instrument Sans', sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .page {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 40px 24px 80px;
+        }
+
+        .top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+        }
+
+        .brand {
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 900;
+            font-size: 28px;
+            letter-spacing: -0.04em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+            .brand::before {
+                content: '';
+                width: 26px;
+                height: 26px;
+                background: var(--ink);
+                border-radius: 50% 50% 50% 0;
+                transform: rotate(-45deg);
+            }
+
+        .export-btn {
+            background: var(--ink);
+            color: var(--lime);
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 12px 20px;
+            border-radius: 999px;
+            text-decoration: none;
+            transition: transform .15s, background .15s;
+        }
+
+            .export-btn:hover {
+                background: var(--ink-2);
+                transform: translateY(-2px);
+            }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        .left {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            position: sticky;
+            top: 24px;
+        }
+
+        .balance {
+            background: var(--lime);
+            border-radius: 36px;
+            padding: 30px 30px 26px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .label {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: .02em;
+            color: var(--muted);
+        }
+
+        .balance h2 {
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 900;
+            font-size: clamp(38px, 5.4vw, 56px);
+            letter-spacing: -0.06em;
+            line-height: 1.05;
+            margin: 10px 0 16px;
+            word-break: break-all;
+        }
+
+            .balance h2 sup {
+                font-size: .42em;
+                font-weight: 700;
+                vertical-align: top;
+                margin-right: 4px;
+                position: relative;
+                top: .25em;
+            }
+
+        .progress-box {
+            margin-bottom: 20px;
+        }
+
+        .progress-title {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .progress-bar-bg {
+            background: rgba(20, 13, 41, .12);
+            height: 10px;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            background: var(--ink);
+            height: 100%;
+            width: 0%;
+            transition: width .5s ease;
+        }
+
+        .mini {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+            .mini div {
+                background: rgba(20, 13, 41, .09);
+                border-radius: 18px;
+                padding: 12px 14px;
+            }
+
+            .mini b {
+                display: block;
+                font-family: 'Unbounded', sans-serif;
+                font-weight: 700;
+                font-size: 15px;
+                margin-top: 2px;
+            }
+
+        .form-card {
+            background: var(--ink);
+            color: var(--cream);
+            border-radius: 36px;
+            padding: 28px;
+        }
+
+            .form-card h3 {
+                font-family: 'Unbounded', sans-serif;
+                font-weight: 700;
+                font-size: 18px;
+                margin-bottom: 18px;
+            }
+
+        .toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            background: var(--ink-2);
+            border-radius: 999px;
+            padding: 5px;
+            margin-bottom: 12px;
+        }
+
+            .toggle button {
+                font: inherit;
+                font-size: 14px;
+                font-weight: 600;
+                border: none;
+                background: transparent;
+                color: rgba(247, 243, 255, .6);
+                padding: 11px;
+                border-radius: 999px;
+                cursor: pointer;
+            }
+
+                .toggle button.active.in {
+                    background: var(--lime);
+                    color: var(--ink);
+                }
+
+                .toggle button.active.out {
+                    background: var(--coral);
+                    color: var(--ink);
+                }
+
+        .form-card input, .form-card select {
+            width: 100%;
+            font: inherit;
+            font-size: 15px;
+            background: var(--ink-2);
+            color: var(--cream);
+            border: 2px solid transparent;
+            border-radius: 18px;
+            padding: 15px 18px;
+            margin-bottom: 12px;
+            outline: none;
+        }
+
+            .form-card select option {
+                background: var(--ink-2);
+                color: var(--cream);
+            }
+
+        .submit {
+            width: 100%;
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            background: var(--lilac);
+            color: var(--ink);
+            border: none;
+            border-radius: 18px;
+            padding: 16px;
+            cursor: pointer;
+            transition: transform .15s, background .15s;
+        }
+
+            .submit:hover {
+                background: #fff;
+                transform: translateY(-2px);
+            }
+
+        .history {
+            background: var(--cream);
+            border-radius: 36px;
+            padding: 28px;
+            min-height: 420px;
+        }
+
+        .analytics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+            .analytics-header h3 {
+                font-family: 'Unbounded', sans-serif;
+                font-weight: 700;
+                font-size: 18px;
+            }
+
+        .period-tabs {
+            display: flex;
+            background: rgba(20, 13, 41, .08);
+            border-radius: 999px;
+            padding: 3px;
+        }
+
+        .period-btn {
+            font: inherit;
+            font-size: 11px;
+            font-weight: 700;
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            padding: 6px 12px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+            .period-btn.active {
+                background: var(--ink);
+                color: var(--lime);
+            }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: #fff;
+            border-radius: 20px;
+            padding: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,.03);
+        }
+
+            .metric-card .label {
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                color: var(--muted);
+            }
+
+            .metric-card .val {
+                font-family: 'Unbounded', sans-serif;
+                font-weight: 700;
+                font-size: 16px;
+                margin-top: 4px;
+                color: var(--ink);
+            }
+
+        .categories-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+
+        .chip {
+            background: #fff;
+            padding: 8px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--ink);
+            box-shadow: 0 2px 4px rgba(0,0,0,.04);
+        }
+
+        .history-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 14px;
+        }
+
+            .history-head h3 {
+                font-family: 'Unbounded', sans-serif;
+                font-weight: 700;
+                font-size: 18px;
+            }
+
+        .count {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+        }
+
+        .list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 48px 1fr auto;
+            align-items: center;
+            gap: 14px;
+            background: #fff;
+            border-radius: 24px;
+            padding: 12px 14px;
+        }
+
+        .avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 16px;
+            display: grid;
+            place-items: center;
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 900;
+            font-size: 18px;
+        }
+
+        .row.in .avatar {
+            background: var(--lime);
+        }
+
+        .row.out .avatar {
+            background: var(--coral);
+        }
+
+        .desc {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .type {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .amt {
+            font-family: 'Unbounded', sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            padding: 9px 14px;
+            border-radius: 999px;
+        }
+
+        .row.in .amt {
+            background: var(--ink);
+            color: var(--lime);
+        }
+
+        .row.out .amt {
+            background: var(--ink-2);
+            color: var(--coral);
+        }
+
+        @media (max-width: 880px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .left {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="top">
+            <div class="brand">wallet</div>
+            <a href="/wallet/export/csv" class="export-btn">↓ Export CSV</a>
+        </div>
+
+        <div class="layout">
+            <div class="left">
+                <section class="balance" id="balanceCard">
+                    <div class="label">Total balance</div>
+                    <h2 id="balanceAmount">…</h2>
+
+                    <div class="progress-box">
+                        <div class="progress-title">
+                            <span>Income Spent Ratio</span>
+                            <span id="spentPercent">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="progressFill"></div>
+                        </div>
+                    </div>
+
+                    <div class="mini">
+                        <div><span class="label">Money in</span><b id="totalIn">0.00</b></div>
+                        <div><span class="label">Money out</span><b id="totalOut">0.00</b></div>
+                    </div>
+                </section>
+
+                <form class="form-card" id="transactionForm">
+                    <h3>New transaction</h3>
+                    <div class="toggle">
+                        <button type="button" class="in active" data-sign="1">Income</button>
+                        <button type="button" class="out" data-sign="-1">Expense</button>
+                    </div>
+                    <input type="text" id="description" placeholder="What was it for?" required autocomplete="off">
+                    <select id="categorySelect" required></select>
+                    <input type="number" step="0.01" min="0.01" id="amount" placeholder="Amount in EUR" required>
+                    <button type="submit" class="submit">Add transaction →</button>
+                </form>
+            </div>
+
+            <section class="history">
+                <div class="analytics-header">
+                    <h3>Analytics</h3>
+                    <div class="period-tabs">
+                        <button type="button" class="period-btn" data-period="weekly">Weekly</button>
+                        <button type="button" class="period-btn active" data-period="monthly">Monthly</button>
+                        <button type="button" class="period-btn" data-period="yearly">Yearly</button>
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="label">Savings Rate</div>
+                        <div class="val" id="savingsRateVal">0%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="label">Avg. Expense</div>
+                        <div class="val" id="avgExpenseVal">0.00 €</div>
+                    </div>
+                    <div class="metric-card" style="grid-column: span 2;">
+                        <div class="label">Peak Expense</div>
+                        <div class="val" id="peakExpenseVal">None</div>
+                    </div>
+                </div>
+
+                <div class="label" style="margin-bottom: 8px;">Category Share Breakdown</div>
+                <div class="categories-chips" id="topCategoriesChips"></div>
+
+                <div class="history-head" style="margin-top: 24px;">
+                    <h3>Activity</h3>
+                    <span class="count" id="txCount"></span>
+                </div>
+                <ul class="list" id="transactionsList"></ul>
+            </section>
+        </div>
+    </div>
+
+    <script>
+                const apiBase = window.location.origin;
+                let sign = 1;
+                let currentPeriod = 'monthly';
+                let cachedAnalytics = null;
+
+                function fmt(n) {
+                    return Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+
+                function updateCategoryDropdown() {
+                    if (!cachedAnalytics) return;
+                    const catSelect = document.getElementById('categorySelect');
+                    catSelect.innerHTML = '';
+
+                    const categories = sign === 1 ? cachedAnalytics.incomeCategories : cachedAnalytics.expenseCategories;
+                    if (categories && Array.isArray(categories)) {
+                        categories.forEach(cat => {
+                            const opt = document.createElement('option');
+                            opt.value = cat;
+                            opt.textContent = cat;
+                            catSelect.appendChild(opt);
+                        });
+                    }
+                }
+
+                document.querySelectorAll('.toggle button').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        sign = parseInt(btn.dataset.sign, 10);
+                        document.querySelectorAll('.toggle button').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        updateCategoryDropdown();
+                    });
+                });
+
+                document.querySelectorAll('.period-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentPeriod = btn.dataset.period;
+                        loadWalletData();
+                    });
+                });
+
+                async function loadWalletData() {
+                    try {
+                        const balanceRes = await fetch(`${apiBase}/wallet/balance`);
+                        const balanceData = await balanceRes.json();
+                        const bal = balanceData.currentBalance;
+
+                        const balEl = document.getElementById('balanceAmount');
+                        balEl.textContent = '';
+                        const cur = document.createElement('sup');
+                        cur.textContent = '€';
+                        balEl.append(cur, (bal < 0 ? '−' : '') + fmt(bal));
+
+                        document.getElementById('totalIn').textContent = '+' + fmt(balanceData.totalIncome) + ' €';
+                        document.getElementById('totalOut').textContent = '−' + fmt(Math.abs(balanceData.totalExpense)) + ' €';
+
+                        const analyticsRes = await fetch(`${apiBase}/wallet/analytics?period=${currentPeriod}`);
+                        cachedAnalytics = await analyticsRes.json();
+
+                        updateCategoryDropdown();
+
+                        const ratio = Math.min(cachedAnalytics.spentRatioPercentage || 0, 100);
+                        document.getElementById('spentPercent').textContent = `${cachedAnalytics.spentRatioPercentage || 0}%`;
+                        document.getElementById('progressFill').style.width = `${ratio}%`;
+
+                        document.getElementById('savingsRateVal').textContent = `${cachedAnalytics.savingsRatePercentage || 0}%`;
+                        document.getElementById('avgExpenseVal').textContent = `${fmt(cachedAnalytics.averageExpense || 0)} €`;
+
+                        if (cachedAnalytics.peakExpense) {
+                            document.getElementById('peakExpenseVal').textContent = `${cachedAnalytics.peakExpense.description} (${fmt(cachedAnalytics.peakExpense.amount)} €)`;
+                        } else {
+                            document.getElementById('peakExpenseVal').textContent = 'None';
+                        }
+
+                        const chipsContainer = document.getElementById('topCategoriesChips');
+                        chipsContainer.innerHTML = '';
+                        if (!cachedAnalytics.topExpenseCategories || cachedAnalytics.topExpenseCategories.length === 0) {
+                            chipsContainer.innerHTML = '<div class="chip">No expenses recorded for this period</div>';
+                        } else {
+                            cachedAnalytics.topExpenseCategories.forEach(c => {
+                                const chip = document.createElement('div');
+                                chip.className = 'chip';
+                                chip.textContent = `${c.category}: ${fmt(c.total)} € (${c.percentage}%)`;
+                                chipsContainer.appendChild(chip);
+                            });
+                        }
+
+                        const txRes = await fetch(`${apiBase}/wallet/transactions`);
+                        const txs = await txRes.json();
+
+                        document.getElementById('txCount').textContent =
+                            txs.length ? `${txs.length} transaction${txs.length === 1 ? '' : 's'}` : '';
+
+                        const list = document.getElementById('transactionsList');
+                        list.innerHTML = '';
+
+                        txs.forEach((tx) => {
+                            const isIncome = tx.amount > 0;
+                            const li = document.createElement('li');
+                            li.className = 'row ' + (isIncome ? 'in' : 'out');
+
+                            const avatar = document.createElement('div');
+                            avatar.className = 'avatar';
+                            avatar.textContent = (tx.description || '?').trim().charAt(0).toUpperCase();
+
+                            const mid = document.createElement('div');
+                            const desc = document.createElement('div');
+                            desc.className = 'desc';
+                            desc.textContent = tx.description;
+                            const type = document.createElement('div');
+                            type.className = 'type';
+                            type.textContent = `${tx.category} • ${tx.type.toLowerCase()}`;
+                            mid.append(desc, type);
+
+                            const amt = document.createElement('div');
+                            amt.className = 'amt';
+                            amt.textContent = (isIncome ? '+' : '−') + fmt(tx.amount) + ' €';
+
+                            li.append(avatar, mid, amt);
+                            list.appendChild(li);
+                        });
+                    } catch (err) {
+                        console.error('Error loading wallet data:', err);
+                    }
+                }
+
+                document.getElementById('transactionForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const description = document.getElementById('description').value;
+                    const category = document.getElementById('categorySelect').value;
+                    const amount = Math.abs(parseFloat(document.getElementById('amount').value)) * sign;
+
+                    await fetch(`${apiBase}/wallet/transactions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ description, category, amount })
+                    });
+
+                    document.getElementById('transactionForm').reset();
+                    loadWalletData();
+                });
+
+                loadWalletData();
+    </script>
+</body>
+</html>
