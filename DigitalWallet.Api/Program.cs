@@ -1,8 +1,21 @@
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
+
+// 1. Връзка с PostgreSQL в Kubernetes (postgres-service)
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql("Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword"));
 
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+// 2. Автоматично създаване на таблиците при старт
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -10,22 +23,17 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// 3. Поддръжка на фронтенда (wwwroot папка)
 app.UseStaticFiles();
 
 var incomeCategories = new[] { "Salary", "Investment", "Freelance", "Gift", "Other Income" };
 var expenseCategories = new[] { "Food", "Transport", "Utilities", "Entertainment", "Shopping", "Rent", "Other Expense" };
 
-var transactions = new List<Transaction>
+// 4. API Ендпоинти, които четат и пишат в истинската база данни
+app.MapGet("/wallet/balance", async (AppDbContext db) =>
 {
-    new(Guid.NewGuid(), "Monthly Salary", 2500.00m, "Income", "Salary", DateTime.UtcNow.AddDays(-5)),
-    new(Guid.NewGuid(), "Supermarket Weekly", -185.50m, "Expense", "Food", DateTime.UtcNow.AddDays(-3)),
-    new(Guid.NewGuid(), "Metro Card", -25.00m, "Expense", "Transport", DateTime.UtcNow.AddDays(-2)),
-    new(Guid.NewGuid(), "Electricity Bill", -65.00m, "Expense", "Utilities", DateTime.UtcNow.AddDays(-1)),
-    new(Guid.NewGuid(), "Cinema & Drinks", -35.00m, "Expense", "Entertainment", DateTime.UtcNow)
-};
-
-app.MapGet("/wallet/balance", () =>
-{
+    var transactions = await db.Transactions.ToListAsync();
     var balance = transactions.Sum(t => t.Amount);
     var totalIn = transactions.Where(t => t.Amount > 0).Sum(t => t.Amount);
     var totalOut = transactions.Where(t => t.Amount < 0).Sum(t => t.Amount);
@@ -40,25 +48,22 @@ app.MapGet("/wallet/balance", () =>
 })
 .WithName("GetBalance");
 
-app.MapGet("/wallet/transactions", (string? search, string? category) =>
+app.MapGet("/wallet/transactions", async (string? search, string? category, AppDbContext db) =>
 {
-    var query = transactions.AsEnumerable();
+    var query = db.Transactions.AsQueryable();
 
     if (!string.IsNullOrWhiteSpace(search))
-    {
-        query = query.Where(t => t.Description.Contains(search, StringComparison.OrdinalIgnoreCase));
-    }
+        query = query.Where(t => t.Description.Contains(search));
 
     if (!string.IsNullOrWhiteSpace(category))
-    {
-        query = query.Where(t => t.Category.Equals(category, StringComparison.OrdinalIgnoreCase));
-    }
+        query = query.Where(t => t.Category.ToLower() == category.ToLower());
 
-    return Results.Ok(query.OrderByDescending(t => t.CreatedAt).ToList());
+    var result = await query.OrderByDescending(t => t.CreatedAt).ToListAsync();
+    return Results.Ok(result);
 })
 .WithName("GetTransactions");
 
-app.MapPost("/wallet/transactions", (CreateTransactionRequest request) =>
+app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, AppDbContext db) =>
 {
     if (request.Amount == 0)
         return Results.BadRequest("Amount cannot be zero.");
@@ -67,28 +72,33 @@ app.MapPost("/wallet/transactions", (CreateTransactionRequest request) =>
     var allowed = isIncome ? incomeCategories : expenseCategories;
     var category = allowed.FirstOrDefault(c => c.Equals(request.Category, StringComparison.OrdinalIgnoreCase)) ?? (isIncome ? "Other Income" : "Other Expense");
 
-    var transaction = new Transaction(
-        Guid.NewGuid(),
-        request.Description,
-        request.Amount,
-        isIncome ? "Income" : "Expense",
-        category,
-        DateTime.UtcNow
-    );
+    var transaction = new TransactionEntity
+    {
+        Id = Guid.NewGuid(),
+        Description = request.Description,
+        Amount = request.Amount,
+        Type = isIncome ? "Income" : "Expense",
+        Category = category,
+        CreatedAt = DateTime.UtcNow
+    };
 
-    transactions.Add(transaction);
+    db.Transactions.Add(transaction);
+    await db.SaveChangesAsync();
+
     return Results.Created($"/wallet/transactions/{transaction.Id}", transaction);
 })
 .WithName("CreateTransaction");
 
-app.MapGet("/wallet/analytics", (string? period) =>
+app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
 {
+    var allTransactions = await db.Transactions.ToListAsync();
     var now = DateTime.UtcNow;
+
     var filtered = period?.ToLower() switch
     {
-        "weekly" => transactions.Where(t => t.CreatedAt >= now.AddDays(-7)),
-        "yearly" => transactions.Where(t => t.CreatedAt.Year == now.Year),
-        _ => transactions.Where(t => t.CreatedAt.Month == now.Month && t.CreatedAt.Year == now.Year)
+        "weekly" => allTransactions.Where(t => t.CreatedAt >= now.AddDays(-7)),
+        "yearly" => allTransactions.Where(t => t.CreatedAt.Year == now.Year),
+        _ => allTransactions.Where(t => t.CreatedAt.Month == now.Month && t.CreatedAt.Year == now.Year)
     };
 
     var list = filtered.ToList();
@@ -128,14 +138,15 @@ app.MapGet("/wallet/analytics", (string? period) =>
 })
 .WithName("GetAnalytics");
 
-app.MapGet("/wallet/export/csv", () =>
+app.MapGet("/wallet/export/csv", async (AppDbContext db) =>
 {
+    var transactions = await db.Transactions.ToListAsync();
     var csv = new System.Text.StringBuilder();
     csv.AppendLine("Id,Description,Amount,Type,Category,CreatedAt");
 
     foreach (var t in transactions)
     {
-        csv.AppendLine($"{t.Id},{escapeCsv(t.Description)},{t.Amount},{t.Type},{escapeCsv(t.Category)},{t.CreatedAt:yyyy-MM-dd HH:mm:ss}");
+        csv.AppendLine($"{t.Id},{EscapeCsv(t.Description)},{t.Amount},{t.Type},{EscapeCsv(t.Category)},{t.CreatedAt:yyyy-MM-dd HH:mm:ss}");
     }
 
     var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
@@ -143,9 +154,13 @@ app.MapGet("/wallet/export/csv", () =>
 })
 .WithName("ExportCsv");
 
+app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
+
+app.MapFallbackToFile("index.html");
+
 app.Run();
 
-static string escapeCsv(string field) => $"\"{field.Replace("\"", "\"\"")}\"";
+// 5. Помощен метод и заявка (само те остават най-долу)
+static string EscapeCsv(string field) => $"\"{field.Replace("\"", "\"\"")}\"";
 
-record Transaction(Guid Id, string Description, decimal Amount, string Type, string Category, DateTime CreatedAt);
 record CreateTransactionRequest(string Description, decimal Amount, string Category);
