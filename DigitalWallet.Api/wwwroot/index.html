@@ -240,6 +240,20 @@
                 color: var(--cream);
             }
 
+        .form-error {
+            background: rgba(255, 107, 129, .15);
+            color: var(--coral);
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 14px;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+        }
+
+            .form-error:empty {
+                display: none;
+            }
+
         .submit {
             width: 100%;
             font-family: 'Unbounded', sans-serif;
@@ -483,6 +497,7 @@
                     <input type="text" id="description" placeholder="What was it for?" required autocomplete="off">
                     <select id="categorySelect" required></select>
                     <input type="number" step="0.01" min="0.01" id="amount" placeholder="Amount in EUR" required>
+                    <div class="form-error" id="formError"></div>
                     <button type="submit" class="submit">Add transaction →</button>
                 </form>
             </div>
@@ -655,15 +670,33 @@
 
                 document.getElementById('transactionForm').addEventListener('submit', async (e) => {
                     e.preventDefault();
+                    const errorBox = document.getElementById('formError');
+                    errorBox.textContent = '';
+
                     const description = document.getElementById('description').value;
                     const category = document.getElementById('categorySelect').value;
                     const amount = Math.abs(parseFloat(document.getElementById('amount').value)) * sign;
 
-                    await fetch(`${apiBase}/wallet/transactions`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ description, category, amount })
-                    });
+                    try {
+                        const res = await fetch(`${apiBase}/wallet/transactions`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ description, category, amount })
+                        });
+
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => null);
+                            errorBox.textContent =
+                                err?.detail ||
+                                (err?.errors ? Object.values(err.errors).flat().join(' ') : '') ||
+                                err?.title ||
+                                'Something went wrong. Please try again.';
+                            return;
+                        }
+                    } catch (err) {
+                        errorBox.textContent = 'Could not reach the server.';
+                        return;
+                    }
 
                     document.getElementById('transactionForm').reset();
                     loadWalletData();
