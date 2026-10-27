@@ -2,19 +2,16 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY *.csproj ./
-RUN dotnet restore
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore
 
 COPY . ./
-RUN dotnet publish -c Release -o /app/publish
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet publish -c Release -o /app/publish
 
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
-
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgssapi-krb5-2 \
-    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m appuser && chown -R appuser /app
 
