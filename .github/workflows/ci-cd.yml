@@ -47,8 +47,15 @@ jobs:
       - name: Build Project
         run: dotnet build --no-restore --configuration Release
 
-      - name: Run Unit & Integration Tests
+      - name: Run All Unit & Integration Tests
         run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Upload Test Coverage Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-coverage-report
+          path: ./DigitalWallet.Api/**/TestResults/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -71,8 +78,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  helm-validation:
-    name: Validate Helm Chart & GitOps Ready
+  helm-validation-and-deploy:
+    name: Validate Helm Chart & Deploy
     needs: test-and-build
     runs-on: ubuntu-latest
 
@@ -98,3 +105,13 @@ jobs:
           helm template DigitalWallet.Api/digital-wallet-chart/ \
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ github.sha }}
+
+      - name: Deploy with Helm (Dry Run / Cluster Ready)
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "==> Upgrading Helm release..."
+          helm upgrade --install digital-wallet-release DigitalWallet.Api/digital-wallet-chart/ \
+            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ github.sha }} \
+            --dry-run
+          echo "Helm upgrade template generated successfully!"
