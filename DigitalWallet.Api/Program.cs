@@ -1,27 +1,57 @@
 using System.Globalization;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Vault инжектира секретите като файлове в /vault/secrets.
+// Добавяме KeyPerFile проследяване за директорията с поддръжка на подпапки и ключове.
 builder.Configuration.AddKeyPerFile("/vault/secrets", optional: true, reloadOnChange: true);
 
-var connectionString = builder.Configuration.GetConnectionString("Default")
-    ?? "Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword";
+// Разчитаме ConnectionString от конфигурацията (която вече е заредена от Vault файловете или fallback)
+var connectionString = builder.Configuration.GetConnectionString("Default");
+
+// Ако все още е празен или липсва, опитваме се да го прочетем директно от инжектирания файл на Vault агента
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    var vaultSecretPath = "/vault/secrets/ConnectionStrings__Default";
+    if (File.Exists(vaultSecretPath))
+    {
+        connectionString = File.ReadAllText(vaultSecretPath).Trim();
+    }
+}
+
+// Краен fallback, ако нищо от Vault не е заредено
+connectionString ??= "Host=postgres-service;Database=walletdb;Username=postgres;Password=mysecretpassword";
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
+
 var app = builder.Build();
 
+app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
+// Безопасно инициализиране на базата данни с опити (Retry pattern)
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    int maxRetries = 10;
-    int delaySeconds = 3;
+    int maxRetries = 30; // Увеличено на 30 опита
+    int delaySeconds = 5; // Увеличено на 5 секунди пауза (общо 150 сек време за изчакване)
 
     for (int i = 0; i < maxRetries; i++)
     {
@@ -47,12 +77,15 @@ using (var scope = app.Services.CreateScope())
 
 app.UseExceptionHandler();
 
-if (app.Environment.IsDevelopment())
+app.MapOpenApi();
+app.MapScalarApiReference("docs", options =>
 {
-    app.MapOpenApi();
-    app.UseHttpsRedirection();
-}
+    options
+        .WithTitle("Digital Wallet API")
+        .WithTheme(ScalarTheme.Purple);
+});
 
+app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 var incomeCategories = new[] { "Salary", "Investment", "Freelance", "Gift", "Other Income" };

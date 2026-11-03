@@ -1,5 +1,4 @@
 apiVersion: v1
-kind: Secret
 kind: Service
 metadata:
   name: {{ include "digital-wallet-chart.fullname" . }}

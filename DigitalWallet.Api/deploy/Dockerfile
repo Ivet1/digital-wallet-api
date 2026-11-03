@@ -13,6 +13,13 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgssapi-krb5-2 \
+    libc6 \
+    libstdc++6 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd -m appuser && chown -R appuser /app
 
 COPY --from=build --chown=appuser:appuser /app/publish .
