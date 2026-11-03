@@ -78,8 +78,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  helm-validation-and-deploy:
-    name: Validate Helm Chart & Deploy
+  helm-validation:
+    name: Validate Helm Chart
     needs: test-and-build
     runs-on: ubuntu-latest
 
@@ -105,13 +105,3 @@ jobs:
           helm template DigitalWallet.Api/digital-wallet-chart/ \
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ github.sha }}
-
-      - name: Deploy with Helm (Dry Run / Cluster Ready)
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "==> Upgrading Helm release..."
-          helm upgrade --install digital-wallet-release DigitalWallet.Api/digital-wallet-chart/ \
-            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
-            --set image.tag=${{ github.sha }} \
-            --dry-run
-          echo "Helm upgrade template generated successfully!"
