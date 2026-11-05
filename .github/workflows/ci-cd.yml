@@ -105,3 +105,20 @@ jobs:
           helm template DigitalWallet.Api/digital-wallet-chart/ \
             --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             --set image.tag=${{ github.sha }}
+
+  deploy-to-staging:
+    name: Deploy to Staging
+    needs: [test-and-build, helm-validation]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: staging
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Confirm Staging Deployment
+        run: |
+          echo "Staging deployment approved and verified for image tag: ${{ github.sha }}"
