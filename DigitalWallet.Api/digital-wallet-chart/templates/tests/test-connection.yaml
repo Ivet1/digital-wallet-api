@@ -7,9 +7,17 @@ metadata:
   annotations:
     "helm.sh/hook": test
 spec:
+  automountServiceAccountToken: false
   containers:
     - name: wget
       image: busybox
       command: ['wget']
       args: ['{{ include "digital-wallet-chart.fullname" . }}:{{ .Values.service.port }}']
+      resources:
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
   restartPolicy: Never

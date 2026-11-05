@@ -1,30 +1,26 @@
-using System.Globalization;
 using System.Text;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using OpenTelemetry.Metrics;
+using DigitalWallet.Api; 
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Vault инжектира секретите като файлове в /vault/secrets.
-// Добавяме KeyPerFile проследяване за директорията с поддръжка на подпапки и ключове.
 builder.Configuration.AddKeyPerFile("/vault/secrets", optional: true, reloadOnChange: true);
 
-// Разчитаме ConnectionString от конфигурацията (която вече е заредена от Vault файловете или fallback)
 var connectionString = builder.Configuration.GetConnectionString("Default");
 
-// Ако все още е празен или липсва, опитваме се да го прочетем директно от инжектирания файл на Vault агента
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     var vaultSecretPath = "/vault/secrets/ConnectionStrings__Default";
     if (File.Exists(vaultSecretPath))
     {
-        connectionString = File.ReadAllText(vaultSecretPath).Trim();
+        connectionString = (await File.ReadAllTextAsync(vaultSecretPath)).Trim();
     }
 }
 
-// Краен fallback, ако нищо от Vault не е заредено
-connectionString ??= "Host=postgres-service;Database=walletdb;Username=postgres;Password=mysecretpassword";
+connectionString ??= "Host=postgres-service;Database=walletdb;Username=postgres;Password=ChangeMe_ManagedByVault";
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddOpenApi();
@@ -44,21 +40,20 @@ var app = builder.Build();
 
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
 
-// Безопасно инициализиране на базата данни с опити (Retry pattern)
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    int maxRetries = 30; // Увеличено на 30 опита
-    int delaySeconds = 5; // Увеличено на 5 секунди пауза (общо 150 сек време за изчакване)
+    int maxRetries = 30;
+    int delaySeconds = 5;
 
     for (int i = 0; i < maxRetries; i++)
     {
         try
         {
             logger.LogInformation("Attempting to connect to the database and ensure created (Attempt {Attempt}/{Max})...", i + 1, maxRetries);
-            db.Database.EnsureCreated();
+            await db.Database.EnsureCreatedAsync();
             logger.LogInformation("Database connected and initialized successfully!");
             break;
         }
@@ -70,7 +65,7 @@ using (var scope = app.Services.CreateScope())
                 throw;
             }
             logger.LogWarning("Database not ready yet. Retrying in {Seconds} seconds...", delaySeconds);
-            Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
         }
     }
 }
@@ -96,7 +91,6 @@ const string DefaultExpenseCategory = "Other Expense";
 const decimal MaxAmount = 1_000_000m;
 const int MaxDescriptionLength = 120;
 const long WalletLockKey = 827364L;
-
 
 app.MapGet("/wallet/balance", async (AppDbContext db) =>
 {
@@ -323,7 +317,6 @@ app.MapGet("/ready", async (AppDbContext db) =>
 app.MapFallbackToFile("index.html");
 
 app.Run();
-
 
 static string Money(decimal value) => value.ToString("N2", CultureInfo.InvariantCulture);
 

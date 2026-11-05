@@ -11,42 +11,50 @@ spec:
   backoffLimit: 3
   template:
     spec:
+      automountServiceAccountToken: true
       serviceAccountName: default
       restartPolicy: OnFailure
       containers:
-      - name: vault-bootstrap
-        image: "hashicorp/vault:2.0.4"
-        env:
-        - name: VAULT_ADDR
-          value: "http://vault.{{ .Release.Namespace }}.svc:8200"
-        - name: VAULT_TOKEN
-          value: "root"
-        command: ["/bin/sh", "-ec"]
-        args:
-        - |
-          echo "Waiting for Vault service at $VAULT_ADDR..."
-          until vault status >/dev/null 2>&1; do
-            sleep 2
-          done
+        - name: vault-bootstrap
+          image: "hashicorp/vault:2.0.4"
+          env:
+            - name: VAULT_ADDR
+              value: "http://vault.{{ .Release.Namespace }}.svc:8200"
+            - name: VAULT_TOKEN
+              value: "root"
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              echo "Waiting for Vault service at $VAULT_ADDR..."
+              until vault status >/dev/null 2>&1; do
+                sleep 2
+              done
 
-          echo "Enabling Kubernetes auth..."
-          vault auth enable kubernetes || true
+              echo "Enabling Kubernetes auth..."
+              vault auth enable kubernetes || true
 
-          TOKEN_REVIEWER_JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          KUBE_CA_CERT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)
+              TOKEN_REVIEWER_JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              KUBE_CA_CERT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)
 
-          vault write auth/kubernetes/config \
-              kubernetes_host="https://kubernetes.default.svc" \
-              token_reviewer_jwt="$TOKEN_REVIEWER_JWT" \
-              kubernetes_ca_cert="$KUBE_CA_CERT"
+              vault write auth/kubernetes/config \
+                  kubernetes_host="https://kubernetes.default.svc" \
+                  token_reviewer_jwt="$TOKEN_REVIEWER_JWT" \
+                  kubernetes_ca_cert="$KUBE_CA_CERT"
 
-          echo 'path "secret/data/digital-wallet/*" { capabilities = ["read"] }' | vault policy write digital-wallet-policy -
+              echo 'path "secret/data/digital-wallet/*" { capabilities = ["read"] }' | vault policy write digital-wallet-policy -
 
-          vault write auth/kubernetes/role/digital-wallet-role \
-              bound_service_account_names=digital-wallet-app-digital-wallet-chart \
-              bound_service_account_namespaces={{ .Release.Namespace }} \
-              policies=digital-wallet-policy \
-              ttl=1h
+              vault write auth/kubernetes/role/digital-wallet-role \
+                  bound_service_account_names=digital-wallet-app-digital-wallet-chart \
+                  bound_service_account_namespaces={{ .Release.Namespace }} \
+                  policies=digital-wallet-policy \
+                  ttl=1h
 
-          vault kv put secret/digital-wallet/postgres POSTGRES_PASSWORD=postgres || true
-          echo "Vault bootstrap Job completed successfully via Helm hook!"
+              vault kv put secret/digital-wallet/postgres POSTGRES_PASSWORD=postgres || true
+              echo "Vault bootstrap Job completed successfully via Helm hook!"
