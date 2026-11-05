@@ -75,7 +75,7 @@ jobs:
         with:
           image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
           format: 'table'
-          exit-code: '1' # -> Tova spir pipeline-a, ako nameri uyazvimosti!
+          exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
       - name: Log in to Container Registry (GHCR)
@@ -125,7 +125,7 @@ jobs:
             --set image.tag=${{ github.sha }}
 
   deploy-to-staging:
-    name: Deploy to Staging
+    name: Deploy to Staging (GitOps Sync)
     needs: [test-and-build, helm-validation]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -133,10 +133,23 @@ jobs:
     environment:
       name: staging
 
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Confirm Staging Deployment
+      - name: Configure Git User
         run: |
-          echo "Staging deployment approved and verified for image tag: ${{ github.sha }}"
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+      - name: Update Image Tag in Helm Values
+        run: |
+          sed -i 's/tag: .*/tag: "${{ github.sha }}"/' DigitalWallet.Api/digital-wallet-chart/values.yaml
+          git add DigitalWallet.Api/digital-wallet-chart/values.yaml
+          git commit -m "chore(staging): update image tag to ${{ github.sha }} [skip ci]" || echo "No changes to commit"
+          git push origin main
