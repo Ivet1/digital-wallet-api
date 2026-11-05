@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 2
 
 image:
   repository: digital-wallet-api
@@ -13,7 +13,7 @@ serviceAccount:
   create: true
   automount: true
   annotations: {}
-  name: ""
+  name: "digital-wallet-app-digital-wallet-chart"
 
 podAnnotations:
   vault.hashicorp.com/agent-inject: "true"
@@ -90,9 +90,7 @@ autoscaling:
 
 volumes: []
 volumeMounts: []
-
 nodeSelector: {}
 tolerations: {}
 affinity: {}
-
 env: {}
