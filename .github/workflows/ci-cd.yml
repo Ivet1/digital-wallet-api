@@ -82,7 +82,7 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-- name: Update Image Tag in Helm Values
+      - name: Update Image Tag in Helm Values
         run: |
           sed -i 's/tag: .*/tag: "${{ github.sha }}"/' DigitalWallet.Api/digital-wallet-chart/values.yaml
           git add DigitalWallet.Api/digital-wallet-chart/values.yaml
