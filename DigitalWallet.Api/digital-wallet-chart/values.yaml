@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: digital-wallet-api
-  tag: "latest"
+  tag: "01a70f214c1df554abb98b0d7f5e7d7928648e8e"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
