@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      pull-requests: write
 
     steps:
       - name: Checkout Repository
@@ -49,6 +50,19 @@ jobs:
 
       - name: Run All Unit & Integration Tests
         run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Report Code Coverage
+        uses: danielpalme/ReportGenerator-GitHub-Action@5
+        with:
+          reports: './DigitalWallet.Api/**/TestResults/**/*.cobertura.xml'
+          targetdir: './coveragereport'
+          reporttypes: 'MarkdownSummaryGithub'
+
+      - name: Publish Coverage to PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          path: ./coveragereport/Summary.md
 
       - name: Upload Test Coverage Results
         uses: actions/upload-artifact@v4
