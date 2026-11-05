@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: digital-wallet-api
+  repository: ghcr.io/ivet1/digital-wallet-api
   tag: "${{ github.sha }}"
   pullPolicy: IfNotPresent
 
