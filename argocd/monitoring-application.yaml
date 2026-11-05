@@ -13,23 +13,44 @@ spec:
       releaseName: monitoring-stack
       valuesObject:
         prometheus:
-          prometheusSpec:
-            serviceMonitorSelectorNilUsesHelmValues: false
-            podMonitorSelectorNilUsesHelmValues: false
+          ingress:
             enabled: true
             ingressClassName: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: "selfsigned-issuer"
             hosts:
               - prometheus.local
             paths:
               - /
             pathType: Prefix
+            tls:
+              - secretName: prometheus-tls
+                hosts:
+                  - prometheus.local
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+        kubeProxy:
+          enabled: false
         grafana:
           ingress:
             enabled: true
             ingressClassName: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: "selfsigned-issuer"
             hosts:
               - grafana.local
             path: /
+            tls:
+              - secretName: grafana-tls
+                hosts:
+                  - grafana.local
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: monitoring
