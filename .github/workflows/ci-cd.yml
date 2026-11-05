@@ -21,15 +21,15 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0
 
       - name: Lowercase Repository Name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@395193fea7aead6f2af93334e3230c11545db247 
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
@@ -57,7 +57,7 @@ jobs:
         run: dotnet build DigitalWallet.Api/DigitalWallet.Api.csproj --no-restore --configuration Release
 
       - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@18f2510ff396b6339d672545d625cf46e49a88c5 
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           ignore-unfixed: true
@@ -72,11 +72,11 @@ jobs:
           dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebf0fb2af1cb93fcec4a113a6c1 
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry (GHCR)
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@9780b0c442fdb111702fae92f311f7041dc37f03 
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -84,7 +84,7 @@ jobs:
 
       - name: Push Docker Image to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@ca877d9245402d1537745e0e755e95a9d3054f2d # v6.15.0
+        uses: docker/build-push-action@v5
         with:
           context: ./DigitalWallet.Api
           file: ./DigitalWallet.Api/deploy/Dockerfile
@@ -105,7 +105,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        uses: actions/checkout@v4
 
       - name: Configure Git User
         run: |
