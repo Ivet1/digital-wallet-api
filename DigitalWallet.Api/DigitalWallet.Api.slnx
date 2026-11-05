@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/argocd/">
+    <File Path="../argocd/digital-wallet-application.yaml" />
+    <File Path="../argocd/monitoring-application.yaml" />
+  </Folder>
   <Folder Name="/Solution Items/">
     <File Path="../.github/workflows/ci-cd.yml" />
   </Folder>
