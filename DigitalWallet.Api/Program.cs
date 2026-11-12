@@ -1,59 +1,37 @@
-using System.Text;
+using DigitalWallet.Api;
 using System.Globalization;
+using DigitalWallet.Api.Models;
 using Microsoft.EntityFrameworkCore;
-using Scalar.AspNetCore;
-using OpenTelemetry.Metrics;
-using DigitalWallet.Api; 
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration.AddKeyPerFile("/vault/secrets", optional: true, reloadOnChange: true);
-
-var connectionString = builder.Configuration.GetConnectionString("Default");
-
-if (string.IsNullOrWhiteSpace(connectionString))
-{
-    var vaultSecretPath = "/vault/secrets/ConnectionStrings__Default";
-    if (File.Exists(vaultSecretPath))
-    {
-        connectionString = (await File.ReadAllTextAsync(vaultSecretPath)).Trim();
-    }
-}
-
-connectionString ??= "Host=postgres-service;Database=walletdb;Username=postgres;Password=ChangeMe_ManagedByVault";
+// 1. Connection string comes from config / env (ConnectionStrings__Default in your Kubernetes Secret).
+//    The old hardcoded value stays only as a local-dev fallback.
+var connectionString = builder.Configuration.GetConnectionString("Default")
+    ?? "Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword";
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 
-builder.Services.AddOpenTelemetry()
-    .WithMetrics(metrics =>
-    {
-        metrics
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddPrometheusExporter();
-    });
-
 var app = builder.Build();
 
-app.UseOpenTelemetryPrometheusScrapingEndpoint();
-
+// 2. Create tables with retry logic (wait for Postgres to come up in Kubernetes)
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    int maxRetries = 30;
-    int delaySeconds = 5;
+    int maxRetries = 10;
+    int delaySeconds = 3;
 
     for (int i = 0; i < maxRetries; i++)
     {
         try
         {
             logger.LogInformation("Attempting to connect to the database and ensure created (Attempt {Attempt}/{Max})...", i + 1, maxRetries);
-            await db.Database.EnsureCreatedAsync();
+            db.Database.EnsureCreated();
             logger.LogInformation("Database connected and initialized successfully!");
             break;
         }
@@ -65,24 +43,24 @@ using (var scope = app.Services.CreateScope())
                 throw;
             }
             logger.LogWarning("Database not ready yet. Retrying in {Seconds} seconds...", delaySeconds);
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+            Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
         }
     }
 }
 
+// Unhandled errors become clean ProblemDetails responses instead of leaking stack traces
 app.UseExceptionHandler();
 
-app.MapOpenApi();
-app.MapScalarApiReference("docs", options =>
+if (app.Environment.IsDevelopment())
 {
-    options
-        .WithTitle("Digital Wallet API")
-        .WithTheme(ScalarTheme.Purple);
-});
+    app.MapOpenApi();
+    app.UseHttpsRedirection(); // in Kubernetes TLS is usually terminated at the ingress
+}
 
-app.UseHttpsRedirection();
+// 3. Frontend (wwwroot)
 app.UseStaticFiles();
 
+// ---------- Domain rules ----------
 var incomeCategories = new[] { "Salary", "Investment", "Freelance", "Gift", "Other Income" };
 var expenseCategories = new[] { "Food", "Transport", "Utilities", "Entertainment", "Shopping", "Rent", "Other Expense" };
 
@@ -90,8 +68,11 @@ const string DefaultIncomeCategory = "Other Income";
 const string DefaultExpenseCategory = "Other Expense";
 const decimal MaxAmount = 1_000_000m;
 const int MaxDescriptionLength = 120;
-const long WalletLockKey = 827364L;
+const long WalletLockKey = 827364L; // Postgres advisory lock so concurrent expenses can't overdraw the wallet
 
+// 4. API endpoints
+
+// Balance is aggregated in the database instead of loading every row into memory
 app.MapGet("/wallet/balance", async (AppDbContext db) =>
 {
     var totals = await db.Transactions
@@ -105,7 +86,7 @@ app.MapGet("/wallet/balance", async (AppDbContext db) =>
         .FirstOrDefaultAsync();
 
     var income = totals?.Income ?? 0m;
-    var expense = totals?.Expense ?? 0m;
+    var expense = totals?.Expense ?? 0m; // positive number, same convention as /wallet/analytics
 
     return Results.Ok(new
     {
@@ -124,6 +105,7 @@ app.MapGet("/wallet/categories", () => Results.Ok(new
 }))
 .WithName("GetCategories");
 
+// Newest first, capped (default 100, max 500). Search / category are case-insensitive and run in the database.
 app.MapGet("/wallet/transactions", async (string? search, string? category, int? limit, AppDbContext db) =>
 {
     var take = Math.Clamp(limit ?? 100, 1, 500);
@@ -155,18 +137,21 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
 {
     var errors = new Dictionary<string, string[]>();
 
+    // --- description ---
     var description = request.Description?.Trim();
     if (string.IsNullOrEmpty(description))
         errors["description"] = ["Description is required."];
     else if (description.Length > MaxDescriptionLength)
         errors["description"] = [$"Description must be at most {MaxDescriptionLength} characters."];
 
+    // --- amount: money has 2 decimals, never zero, never absurd ---
     var amount = Math.Round(request.Amount, 2, MidpointRounding.AwayFromZero);
     if (amount == 0)
         errors["amount"] = ["Amount must be non-zero (max 2 decimal places)."];
     else if (Math.Abs(amount) > MaxAmount)
         errors["amount"] = [$"Amount must not exceed {MaxAmount.ToString("N0", CultureInfo.InvariantCulture)}."];
 
+    // --- category: optional, but if given it must fit the transaction type ---
     var isIncome = amount > 0;
     var allowed = isIncome ? incomeCategories : expenseCategories;
     var category = isIncome ? DefaultIncomeCategory : DefaultExpenseCategory;
@@ -183,6 +168,8 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
     if (errors.Count > 0)
         return Results.ValidationProblem(errors);
 
+    // Serialize writes so "check balance -> insert" is atomic.
+    // Without this, two parallel expenses could both pass the check and overdraw the wallet.
     await using var dbTx = await db.Database.BeginTransactionAsync();
     await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({WalletLockKey})");
 
@@ -219,6 +206,8 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
 })
 .WithName("CreateTransaction");
 
+// weekly = last 7 days, monthly = current calendar month (default), yearly = current calendar year.
+// Everything is filtered and aggregated in the database.
 app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
 {
     var now = DateTime.UtcNow;
@@ -257,6 +246,7 @@ app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
         .Select(t => new { t.Description, Amount = -t.Amount, t.Category })
         .FirstOrDefaultAsync();
 
+    // With no income in the period a ratio is undefined, so it is null instead of a misleading 0
     decimal? spentRatio = totalIncome > 0 ? Math.Round(totalExpense / totalIncome * 100m, 1) : null;
     decimal? savingsRate = spentRatio is null ? null : Math.Max(0m, 100m - spentRatio.Value);
     var avgExpense = totals is { ExpenseCount: > 0 } ? Math.Round(totalExpense / totals.ExpenseCount, 2) : 0m;
@@ -301,14 +291,17 @@ app.MapGet("/wallet/export/csv", async (AppDbContext db) =>
             t.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)));
     }
 
+    // UTF-8 BOM so Excel opens non-ASCII text correctly
     var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
     return Results.File(bytes, "text/csv", "wallet-transactions.csv");
 })
 .WithName("ExportCsv");
 
+// Liveness: the process is up (no DB call, so a DB hiccup doesn't restart the pod)
 app.MapGet("/healthz", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 
+// Readiness: the DB is reachable. Point the Kubernetes readinessProbe here.
 app.MapGet("/ready", async (AppDbContext db) =>
     await db.Database.CanConnectAsync()
         ? Results.Ok(new { Status = "Ready", Timestamp = DateTime.UtcNow })
@@ -316,7 +309,7 @@ app.MapGet("/ready", async (AppDbContext db) =>
 
 app.MapFallbackToFile("index.html");
 
-app.Run();
+await app.RunAsync();
 
 static string Money(decimal value) => value.ToString("N2", CultureInfo.InvariantCulture);
 
@@ -330,6 +323,3 @@ static string EscapeCsv(string? field)
         value = "'" + value;
     return $"\"{value.Replace("\"", "\"\"")}\"";
 }
-
-record CreateTransactionRequest(string? Description, decimal Amount, string? Category = null);
-record TransactionDto(Guid Id, string Description, decimal Amount, string Type, string Category, DateTime CreatedAt);

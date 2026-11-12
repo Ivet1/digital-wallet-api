@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DigitalWallet.Api/DigitalWallet.Api.csproj" />
+  <Project Path="DigitalWallet.Tests/DigitalWallet.Tests.csproj" />
+</Solution>

@@ -3,8 +3,13 @@
     <File Path="../argocd/digital-wallet-application.yaml" />
     <File Path="../argocd/monitoring-application.yaml" />
   </Folder>
+  <Folder Name="/Models/">
+    <File Path="AppDbContext.cs" />
+    <File Path="TransactionContract.cs" />
+  </Folder>
   <Folder Name="/Solution Items/">
     <File Path="../.github/workflows/ci-cd.yml" />
   </Folder>
   <Project Path="DigitalWallet.Api.csproj" />
+  <Project Path="DigitalWallet.Tests/DigitalWallet.Tests.csproj" />
 </Solution>
