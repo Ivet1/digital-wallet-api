@@ -52,7 +52,7 @@ jobs:
             /o:"ivet1" \
             /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+            /d:sonar.cs.opencover.reportsPaths="**/*opencover*.xml"
 
       - name: Build Project
         run: dotnet build --no-restore --configuration Release
