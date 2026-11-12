@@ -40,7 +40,7 @@ jobs:
           dotnet tool install --global dotnet-sonarscanner
 
       - name: Restore Dependencies
-        run: dotnet restore DigitalWallet.Api/DigitalWallet.Api.csproj
+        run: dotnet restore
 
       - name: Begin SonarCloud Analysis
         env:
@@ -54,7 +54,10 @@ jobs:
             /d:sonar.host.url="https://sonarcloud.io"
 
       - name: Build Project
-        run: dotnet build DigitalWallet.Api/DigitalWallet.Api.csproj --no-restore --configuration Release
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run Tests
+        run: dotnet test --no-build --configuration Release
 
       - name: Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
