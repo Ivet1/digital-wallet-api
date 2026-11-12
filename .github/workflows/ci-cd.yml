@@ -50,7 +50,7 @@ jobs:
           dotnet-sonarscanner begin \
             /k:"Ivet1_digital-wallet-api" \
             /o:"ivet1" \
-            /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
+            /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.cs.opencover.reportsPaths="**/*opencover*.xml"
 
@@ -79,7 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+          dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
