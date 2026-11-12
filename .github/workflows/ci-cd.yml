@@ -51,13 +51,20 @@ jobs:
             /k:"Ivet1_digital-wallet-api" \
             /o:"ivet1" \
             /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
-            /d:sonar.host.url="https://sonarcloud.io"
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
 
       - name: Build Project
         run: dotnet build --no-restore --configuration Release
 
-      - name: Run Tests
-        run: dotnet test --no-build --configuration Release
+      - name: Run Tests with Coverage
+        run: |
+          dotnet test DigitalWallet.Tests/DigitalWallet.Tests.csproj \
+            --no-build \
+            --configuration Release \
+            /p:CollectCoverage=true \
+            /p:CoverletOutputFormat=opencover \
+            /p:CoverletOutput=./coverage.opencover.xml
 
       - name: Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
