@@ -1,24 +1,56 @@
+
 using DigitalWallet.Api;
 using System.Globalization;
 using DigitalWallet.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 using OpenTelemetry.Metrics;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// In production the connection string must come from the deployment (Vault); there is no silent fallback.
-var connectionString = builder.Configuration.GetConnectionString("Default");
-if (string.IsNullOrWhiteSpace(connectionString))
-{
-    if (!builder.Environment.IsDevelopment())
-        throw new InvalidOperationException(
-            "ConnectionStrings:Default is not configured. In production it is provided through Vault / the environment.");
+// In production, the connection string comes directly from Vault Agent.
+string connectionString;
 
-    connectionString = "Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword";
+if (!builder.Environment.IsDevelopment())
+{
+    const string vaultConnectionStringPath = "/vault/secrets/connectionstring";
+
+    if (!File.Exists(vaultConnectionStringPath))
+    {
+        throw new InvalidOperationException(
+            $"Vault connection string file not found: {vaultConnectionStringPath}");
+    }
+
+    connectionString = File.ReadAllText(vaultConnectionStringPath).Trim();
+
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "Vault connection string is empty.");
+    }
+
+    // TEMPORARY DIAGNOSTICS - does NOT print the password.
+    var parsedConnection = new NpgsqlConnectionStringBuilder(connectionString);
+
+    Console.WriteLine("========== DATABASE DIAGNOSTICS ==========");
+    Console.WriteLine($"ENVIRONMENT: {builder.Environment.EnvironmentName}");
+    Console.WriteLine($"DB HOST: {parsedConnection.Host}");
+    Console.WriteLine($"DB PORT: {parsedConnection.Port}");
+    Console.WriteLine($"DB NAME: {parsedConnection.Database}");
+    Console.WriteLine($"DB USER: {parsedConnection.Username}");
+    Console.WriteLine($"DB PASSWORD LENGTH: {parsedConnection.Password?.Length ?? 0}");
+    Console.WriteLine("==========================================");
+}
+else
+{
+    connectionString = builder.Configuration.GetConnectionString("Default")
+        ?? "Host=localhost;Database=walletdb;Username=postgres;Password=secretpassword";
 }
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<AppDbContext>(
+    options => options.UseNpgsql(connectionString));
+
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 
@@ -133,7 +165,9 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
 
     if (!string.IsNullOrWhiteSpace(request.Category))
     {
-        var match = allowed.FirstOrDefault(c => c.Equals(request.Category.Trim(), StringComparison.OrdinalIgnoreCase));
+        var match = allowed.FirstOrDefault(c =>
+            c.Equals(request.Category.Trim(), StringComparison.OrdinalIgnoreCase));
+
         if (match is null)
             errors["category"] = [$"Category must be one of: {string.Join(", ", allowed)}."];
         else
@@ -149,6 +183,7 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
     if (!isIncome)
     {
         var balance = await db.Transactions.SumAsync(t => t.Amount);
+
         if (balance + amount < 0)
         {
             return Results.Problem(
@@ -172,8 +207,13 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
     await db.SaveChangesAsync();
     await dbTx.CommitAsync();
 
-    var dto = new TransactionDto(transaction.Id, transaction.Description, transaction.Amount,
-        transaction.Type, transaction.Category, transaction.CreatedAt);
+    var dto = new TransactionDto(
+        transaction.Id,
+        transaction.Description,
+        transaction.Amount,
+        transaction.Type,
+        transaction.Category,
+        transaction.CreatedAt);
 
     return Results.Created($"/wallet/transactions/{transaction.Id}", dto);
 })
@@ -182,6 +222,7 @@ app.MapPost("/wallet/transactions", async (CreateTransactionRequest request, App
 app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
 {
     var now = DateTime.UtcNow;
+
     var (since, label) = period?.ToLowerInvariant() switch
     {
         "weekly" => (now.AddDays(-7), "weekly"),
@@ -217,9 +258,17 @@ app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
         .Select(t => new { t.Description, Amount = -t.Amount, t.Category })
         .FirstOrDefaultAsync();
 
-    decimal? spentRatio = totalIncome > 0 ? Math.Round(totalExpense / totalIncome * 100m, 1) : null;
-    decimal? savingsRate = spentRatio is null ? null : Math.Max(0m, 100m - spentRatio.Value);
-    var avgExpense = totals is { ExpenseCount: > 0 } ? Math.Round(totalExpense / totals.ExpenseCount, 2) : 0m;
+    decimal? spentRatio = totalIncome > 0
+        ? Math.Round(totalExpense / totalIncome * 100m, 1)
+        : null;
+
+    decimal? savingsRate = spentRatio is null
+        ? null
+        : Math.Max(0m, 100m - spentRatio.Value);
+
+    var avgExpense = totals is { ExpenseCount: > 0 }
+        ? Math.Round(totalExpense / totals.ExpenseCount, 2)
+        : 0m;
 
     return Results.Ok(new
     {
@@ -235,7 +284,9 @@ app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
         {
             c.Category,
             c.Total,
-            Percentage = totalExpense > 0 ? Math.Round(c.Total / totalExpense * 100m, 1) : 0m
+            Percentage = totalExpense > 0
+                ? Math.Round(c.Total / totalExpense * 100m, 1)
+                : 0m
         }),
         IncomeCategories = incomeCategories,
         ExpenseCategories = expenseCategories
@@ -245,7 +296,10 @@ app.MapGet("/wallet/analytics", async (string? period, AppDbContext db) =>
 
 app.MapGet("/wallet/export/csv", async (AppDbContext db) =>
 {
-    var rows = await db.Transactions.AsNoTracking().OrderBy(t => t.CreatedAt).ToListAsync();
+    var rows = await db.Transactions
+        .AsNoTracking()
+        .OrderBy(t => t.CreatedAt)
+        .ToListAsync();
 
     var csv = new StringBuilder();
     csv.AppendLine("Id,Description,Amount,Type,Category,CreatedAt");
@@ -261,22 +315,38 @@ app.MapGet("/wallet/export/csv", async (AppDbContext db) =>
             t.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)));
     }
 
-    var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+    var bytes = Encoding.UTF8.GetPreamble()
+        .Concat(Encoding.UTF8.GetBytes(csv.ToString()))
+        .ToArray();
+
     return Results.File(bytes, "text/csv", "wallet-transactions.csv");
 })
 .WithName("ExportCsv");
 
-app.MapGet("/healthz", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
-app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
+app.MapGet("/healthz", () => Results.Ok(new
+{
+    Status = "Healthy",
+    Timestamp = DateTime.UtcNow
+}));
+
+app.MapGet("/health", () => Results.Ok(new
+{
+    Status = "Healthy",
+    Timestamp = DateTime.UtcNow
+}));
 
 app.MapGet("/ready", async (AppDbContext db, DatabaseInitializer initializer) =>
 {
     if (!initializer.IsReady)
-        return Results.Json(new { Status = "DatabaseInitializing" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Json(
+            new { Status = "DatabaseInitializing" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
 
     return await db.Database.CanConnectAsync()
         ? Results.Ok(new { Status = "Ready", Timestamp = DateTime.UtcNow })
-        : Results.Json(new { Status = "DatabaseUnavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        : Results.Json(
+            new { Status = "DatabaseUnavailable" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
 app.MapPrometheusScrapingEndpoint();
@@ -285,18 +355,23 @@ app.MapFallbackToFile("index.html");
 
 await app.RunAsync();
 
-static string Money(decimal value) => value.ToString("N2", CultureInfo.InvariantCulture);
+static string Money(decimal value) =>
+    value.ToString("N2", CultureInfo.InvariantCulture);
 
 static string EscapeLike(string value) =>
-    value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+    value.Replace("\\", "\\\\")
+         .Replace("%", "\\%")
+         .Replace("_", "\\_");
 
 static string EscapeCsv(string? field)
 {
     var value = field ?? string.Empty;
+
     if (value.Length > 0 && "=+-@\t\r".Contains(value[0]))
         value = "'" + value;
+
     return $"\"{value.Replace("\"", "\"\"")}\"";
 }
 
 // Lets the integration tests (WebApplicationFactory<Program>) see the entry point.
-public partial class Program;
+public partial class Program { }
