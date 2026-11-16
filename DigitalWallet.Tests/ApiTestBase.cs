@@ -7,7 +7,7 @@ using Xunit;
 
 namespace DigitalWallet.Tests;
 
-public abstract class ApiTestBase : IClassFixture<ApiFactory>, IAsyncLifetime
+public abstract class ApiTestBase : IAsyncLifetime
 {
     protected readonly ApiFactory Factory;
     protected readonly HttpClient Client;
