@@ -3,49 +3,34 @@ using System.Globalization;
 using DigitalWallet.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("Default")
-    ?? "Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword";
+// In production the connection string must come from the deployment (Vault); there is no silent fallback.
+var connectionString = builder.Configuration.GetConnectionString("Default");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    if (!builder.Environment.IsDevelopment())
+        throw new InvalidOperationException(
+            "ConnectionStrings:Default is not configured. In production it is provided through Vault / the environment.");
+
+    connectionString = "Host=postgres-service;Database=walletdb;Username=postgres;Password=secretpassword";
+}
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(m => m
+        .AddAspNetCoreInstrumentation()
+        .AddPrometheusExporter());
+
+builder.Services.AddSingleton<DatabaseInitializer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseInitializer>());
+
 var app = builder.Build();
-
-// Инициализацията на базата върви във фонов режим, за да не блокира старта на уеб сървъра (порт 8080)
-_ = Task.Run(async () =>
-{
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-    int maxRetries = 10;
-    int delaySeconds = 3;
-
-    for (int i = 0; i < maxRetries; i++)
-    {
-        try
-        {
-            logger.LogInformation("Attempting to connect to the database and ensure created (Attempt {Attempt}/{Max})...", i + 1, maxRetries);
-            await db.Database.EnsureCreatedAsync();
-            logger.LogInformation("Database connected and initialized successfully!");
-            break;
-        }
-        catch (Exception ex)
-        {
-            if (i == maxRetries - 1)
-            {
-                logger.LogError(ex, "Failed to connect to the database after maximum retries.");
-                break;
-            }
-            logger.LogWarning("Database not ready yet. Retrying in {Seconds} seconds...", delaySeconds);
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
-        }
-    }
-});
 
 app.UseExceptionHandler();
 
@@ -105,14 +90,15 @@ app.MapGet("/wallet/transactions", async (string? search, string? category, int?
 
     if (!string.IsNullOrWhiteSpace(search))
     {
-        var pattern = $"%{EscapeLike(search.Trim())}%";
-        query = query.Where(t => EF.Functions.ILike(t.Description, pattern));
+        var trimmed = search.Trim();
+        var pattern = trimmed == "%" ? "%\\%%" : $"%{EscapeLike(trimmed)}%";
+        query = query.Where(t => EF.Functions.ILike(t.Description, pattern, "\\"));
     }
 
     if (!string.IsNullOrWhiteSpace(category))
     {
         var exact = EscapeLike(category.Trim());
-        query = query.Where(t => EF.Functions.ILike(t.Category, exact));
+        query = query.Where(t => EF.Functions.ILike(t.Category, exact, "\\"));
     }
 
     var result = await query
@@ -283,10 +269,17 @@ app.MapGet("/wallet/export/csv", async (AppDbContext db) =>
 app.MapGet("/healthz", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 app.MapGet("/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 
-app.MapGet("/ready", async (AppDbContext db) =>
-    await db.Database.CanConnectAsync()
+app.MapGet("/ready", async (AppDbContext db, DatabaseInitializer initializer) =>
+{
+    if (!initializer.IsReady)
+        return Results.Json(new { Status = "DatabaseInitializing" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    return await db.Database.CanConnectAsync()
         ? Results.Ok(new { Status = "Ready", Timestamp = DateTime.UtcNow })
-        : Results.Json(new { Status = "DatabaseUnavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable));
+        : Results.Json(new { Status = "DatabaseUnavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+});
+
+app.MapPrometheusScrapingEndpoint();
 
 app.MapFallbackToFile("index.html");
 
@@ -304,3 +297,6 @@ static string EscapeCsv(string? field)
         value = "'" + value;
     return $"\"{value.Replace("\"", "\"\"")}\"";
 }
+
+// Lets the integration tests (WebApplicationFactory<Program>) see the entry point.
+public partial class Program;

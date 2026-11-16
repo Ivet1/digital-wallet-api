@@ -1,54 +1,52 @@
-﻿using DigitalWallet.Api;
-using DigitalWallet.Api.Models;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
+﻿using System.Text.Json;
+using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
+using DigitalWallet.Api;
+using DigitalWallet.Api.Models;
 using Xunit;
 
 namespace DigitalWallet.Tests;
 
-public class ApiTestBase : WebApplicationFactory<Program>, IAsyncLifetime
+public abstract class ApiTestBase : IClassFixture<ApiFactory>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("walletdb_test")
-        .WithUsername("postgres")
-        .WithPassword("secretpassword")
-        .Build();
+    protected readonly ApiFactory Factory;
+    protected readonly HttpClient Client;
 
-    public HttpClient Client { get; private set; } = default!;
+    protected ApiTestBase(ApiFactory factory)
+    {
+        Factory = factory;
+        Client = factory.CreateClient();
+    }
 
     public async Task InitializeAsync()
     {
-        await _dbContainer.StartAsync();
-        Client = CreateClient();
-
-        using var scope = Services.CreateScope();
+        using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        db.Transactions.RemoveRange(db.Transactions);
+        await db.SaveChangesAsync();
     }
 
-    async Task IAsyncLifetime.DisposeAsync()
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    protected async Task<HttpResponseMessage> Post(string description, decimal amount, string? category = null)
     {
-        await _dbContainer.StopAsync();
-        await base.DisposeAsync();
+        return await Client.PostAsJsonAsync("/wallet/transactions", new { Description = description, Amount = amount, Category = category });
     }
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected async Task Seed(string description, decimal amount, string? category = null)
     {
-        builder.ConfigureServices(services =>
-        {
-            var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
+        var response = await Post(description, amount, category);
+        response.EnsureSuccessStatusCode();
+    }
 
-            services.AddDbContext<AppDbContext>(options =>
-            {
-                options.UseNpgsql(_dbContainer.GetConnectionString());
-            });
-        });
+    protected async Task<decimal> Balance()
+    {
+        var json = await GetJson("/wallet/balance");
+        return json.GetProperty("currentBalance").GetDecimal();
+    }
+
+    protected async Task<JsonElement> GetJson(string url)
+    {
+        return await Client.GetFromJsonAsync<JsonElement>(url);
     }
 }
