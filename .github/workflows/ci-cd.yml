@@ -77,7 +77,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deployment-smoke-test:
-    name: Deployment Smoke Test (kind + Vault + DB)
+    name: Deployment Smoke & E2E Test (kind + Vault + DB)
     needs: test-and-build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -164,7 +164,8 @@ jobs:
             --wait --timeout=180s
 
           kubectl wait --for=condition=Ready pod/vault-0 --timeout=120s
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=webhook --timeout=120s
+          kubectl rollout status deployment/vault-agent-injector --timeout=120s || true
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault-agent-injector --timeout=120s
 
           kubectl exec vault-0 -- sh -c '
             export VAULT_ADDR=http://127.0.0.1:8200
@@ -199,7 +200,7 @@ jobs:
             --set ingress.enabled=false \
             --wait --timeout=180s
 
-      - name: Verify Vault Secret File & /healthz + /ready Endpoints
+      - name: Verify Vault Secret File, Probes & End-to-End Wallet Flow
         run: |
           POD_NAME=$(kubectl get pods -l app.kubernetes.io/name=digital-wallet-chart -o jsonpath='{.items[0].metadata.name}')
           echo "Testing pod: $POD_NAME"
@@ -210,18 +211,55 @@ jobs:
           PF_PID=$!
           trap "kill $PF_PID 2>/dev/null || true" EXIT
 
+          READY=0
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:18080/healthz && curl -sf http://127.0.0.1:18080/ready; then
-              echo "Smoke checks passed (/healthz and /ready returned 200)."
-              exit 0
+              READY=1
+              break
             fi
             sleep 2
           done
 
-          echo "Smoke checks failed; dumping pod logs..."
-          kubectl logs "$POD_NAME" -c digital-wallet-chart || true
-          kubectl logs "$POD_NAME" -c vault-agent || true
-          exit 1
+          if [ "$READY" -ne 1 ]; then
+            echo "Smoke checks failed; dumping pod logs..."
+            kubectl logs "$POD_NAME" -c digital-wallet-chart || true
+            kubectl logs "$POD_NAME" -c vault-agent || true
+            exit 1
+          fi
+
+          echo "Running E2E tests against /wallet endpoints..."
+          BASE_URL="http://127.0.0.1:18080"
+
+          curl -sf "$BASE_URL/wallet/categories" > /dev/null
+
+          INCOME_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$BASE_URL/wallet/transactions" \
+            -H "Content-Type: application/json" \
+            -d '{"description":"E2E Salary","amount":100.00,"category":"Salary"}')
+          test "$INCOME_STATUS" -eq 201
+
+          EXPENSE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$BASE_URL/wallet/transactions" \
+            -H "Content-Type: application/json" \
+            -d '{"description":"E2E Food","amount":-30.00,"category":"Food"}')
+          test "$EXPENSE_STATUS" -eq 201
+
+          BALANCE_JSON=$(curl -sf "$BASE_URL/wallet/balance")
+          echo "Balance response: $BALANCE_JSON"
+          echo "$BALANCE_JSON" | grep -qE '"currentBalance"\s*:\s*70(\.0+)?'
+          echo "$BALANCE_JSON" | grep -qE '"totalIncome"\s*:\s*100(\.0+)?'
+          echo "$BALANCE_JSON" | grep -qE '"totalExpense"\s*:\s*30(\.0+)?'
+
+          OVERDRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$BASE_URL/wallet/transactions" \
+            -H "Content-Type: application/json" \
+            -d '{"description":"E2E Overdraft","amount":-500.00,"category":"Food"}')
+          test "$OVERDRAFT_STATUS" -eq 422
+
+          BALANCE_AFTER_422=$(curl -sf "$BASE_URL/wallet/balance")
+          echo "$BALANCE_AFTER_422" | grep -qE '"currentBalance"\s*:\s*70(\.0+)?'
+
+          echo "All smoke and E2E checks passed!"
 
   promote-deploy:
     name: Update Image Tag in Deploy Repo
