@@ -112,47 +112,6 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Start Postgres for Smoke Test
-        run: |
-          kubectl apply -f - <<'EOF'
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: postgres-smoke
-            labels:
-              app: postgres
-          spec:
-            containers:
-              - name: postgres
-                image: postgres:15-alpine
-                env:
-                  - name: POSTGRES_DB
-                    value: walletdb
-                  - name: POSTGRES_USER
-                    value: postgres
-                  - name: POSTGRES_PASSWORD
-                    value: smokepass123
-                ports:
-                  - containerPort: 5432
-                readinessProbe:
-                  exec:
-                    command: ["pg_isready", "-U", "postgres", "-d", "walletdb"]
-                  initialDelaySeconds: 3
-                  periodSeconds: 3
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: postgres-service
-          spec:
-            selector:
-              app: postgres
-            ports:
-              - port: 5432
-                targetPort: 5432
-          EOF
-          kubectl wait --for=condition=Ready pod/postgres-smoke --timeout=120s
-
       - name: Install Vault & Configure Secret + Kubernetes Auth
         run: |
           helm repo add hashicorp https://helm.releases.hashicorp.com
@@ -214,6 +173,9 @@ jobs:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
           EOF
+
+          kubectl delete service postgres-service --ignore-not-found=true
+          kubectl delete pod postgres-smoke --ignore-not-found=true
 
           IMAGE_REPO="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           helm upgrade --install digital-wallet-app deploy-repo/charts/digital-wallet-chart \
