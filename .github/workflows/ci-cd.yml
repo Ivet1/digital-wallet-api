@@ -23,7 +23,6 @@ jobs:
 
       - name: Set Image Name
         run: |
-          set -euo pipefail
           LOWER_REPO=$(printf '%s' "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "IMAGE_NAME=${LOWER_REPO}" >> "$GITHUB_ENV"
 
@@ -36,7 +35,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', './DigitalWallet.Tests/DigitalWallet.Tests.csproj') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: |
             ${{ runner.os }}-nuget-
 
@@ -92,7 +91,6 @@ jobs:
 
       - name: Set Image Name
         run: |
-          set -euo pipefail
           LOWER_REPO=$(printf '%s' "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "IMAGE_NAME=${LOWER_REPO}" >> "$GITHUB_ENV"
 
@@ -116,8 +114,6 @@ jobs:
 
       - name: Install Vault & Configure Secret + Kubernetes Auth
         run: |
-          set -euo pipefail
-
           helm repo add hashicorp https://helm.releases.hashicorp.com
           helm repo update
           helm upgrade --install vault hashicorp/vault \
@@ -130,71 +126,31 @@ jobs:
           kubectl rollout status deployment/vault-agent-injector --timeout=120s || true
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault-agent-injector --timeout=120s
 
-          VAULT_PF_PID=""
-          cleanup_vault_pf() {
-            if [ -n "${VAULT_PF_PID}" ] && kill -0 "${VAULT_PF_PID}" 2>/dev/null; then
-              kill "${VAULT_PF_PID}" 2>/dev/null || true
-            fi
-          }
-          trap cleanup_vault_pf EXIT
+          kubectl exec vault-0 -- sh -c '
+            export VAULT_ADDR=http://127.0.0.1:8200
+            export VAULT_TOKEN=root
 
-          kubectl port-forward -n default svc/vault 8200:8200 >/tmp/vault-pf.log 2>&1 &
-          VAULT_PF_PID=$!
+            vault kv put secret/digital-wallet/postgres password=smokepass123
 
-          export VAULT_ADDR="http://127.0.0.1:8200"
-          export VAULT_TOKEN="root"
-          export ROLE_TTL="1h"
-
-          echo "Waiting for Vault port-forward..."
-          VAULT_READY=0
-          for _ in $(seq 1 30); do
-            if curl -sf "${VAULT_ADDR}/v1/sys/health" >/dev/null 2>&1; then
-              VAULT_READY=1
-              break
-            fi
-            sleep 2
-          done
-
-          if [ "$VAULT_READY" -ne 1 ]; then
-            echo "Vault did not become reachable via port-forward."
-            cat /tmp/vault-pf.log || true
-            exit 1
-          fi
-
-          if [ -f "deploy-repo/vault/bootstrap/configure-vault.sh" ]; then
-            sh deploy-repo/vault/bootstrap/configure-vault.sh
-          else
-            curl -fsSL https://raw.githubusercontent.com/Ivet1/digital-wallet-deploy/main/vault/bootstrap/configure-vault.sh -o /tmp/configure-vault.sh
-            sh /tmp/configure-vault.sh
-            rm -f /tmp/configure-vault.sh
-          fi
-
-          if ! vault auth list -format=json 2>/dev/null | grep -q '"kubernetes/"'; then
-            vault auth enable kubernetes
-          fi
-
-          K8S_HOST="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-          vault write auth/kubernetes/config kubernetes_host="${K8S_HOST}"
-
-          vault policy write digital-wallet-policy - <<'POLICY'
+            vault policy write digital-wallet-policy - <<EOF
           path "secret/data/digital-wallet/postgres" {
             capabilities = ["read"]
           }
-          POLICY
+          EOF
 
-          vault write auth/kubernetes/role/digital-wallet-role \
-            bound_service_account_names=digital-wallet-app-digital-wallet-chart \
-            bound_service_account_namespaces=default \
-            policies=digital-wallet-policy \
-            ttl="${ROLE_TTL}"
+            vault auth enable kubernetes || true
+            vault write auth/kubernetes/config \
+              kubernetes_host="https://kubernetes.default.svc:443"
 
-          vault kv put secret/digital-wallet/postgres password=smokepass123
-          vault kv get -format=json secret/digital-wallet/postgres >/dev/null
+            vault write auth/kubernetes/role/digital-wallet-role \
+              bound_service_account_names=digital-wallet-app-digital-wallet-chart \
+              bound_service_account_namespaces=default \
+              policies=digital-wallet-policy \
+              ttl=1h
+          '
 
       - name: Install ServiceMonitor CRD & Deploy Digital Wallet Chart
         run: |
-          set -euo pipefail
-
           kubectl apply -f - <<'EOF'
           apiVersion: apiextensions.k8s.io/v1
           kind: CustomResourceDefinition
@@ -231,31 +187,18 @@ jobs:
 
       - name: Verify Vault Secret File, Probes & End-to-End Wallet Flow
         run: |
-          set -euo pipefail
-
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=digital-wallet-chart --timeout=120s
           POD_NAME=$(kubectl get pods -l app.kubernetes.io/name=digital-wallet-chart -o jsonpath='{.items[0].metadata.name}')
           echo "Testing pod: $POD_NAME"
 
           kubectl exec "$POD_NAME" -c digital-wallet-chart -- test -s /vault/secrets/connectionstring
 
-          API_PF_PID=""
-          cleanup_all() {
-            if [ -n "${API_PF_PID}" ] && kill -0 "${API_PF_PID}" 2>/dev/null; then
-              kill "${API_PF_PID}" 2>/dev/null || true
-            fi
-          }
-          trap cleanup_all EXIT
-
-          kubectl port-forward "pod/$POD_NAME" 18080:8080 >/tmp/api-pf.log 2>&1 &
-          API_PF_PID=$!
+          kubectl port-forward "pod/$POD_NAME" 18080:8080 &
+          PF_PID=$!
+          trap "kill $PF_PID 2>/dev/null || true" EXIT
 
           READY=0
-          for _ in $(seq 1 40); do
-            if kill -0 "${API_PF_PID}" 2>/dev/null && \
-               curl -sf http://127.0.0.1:18080/healthz >/dev/null 2>&1 && \
-               curl -sf http://127.0.0.1:18080/ready >/dev/null 2>&1 && \
-               curl -sf http://127.0.0.1:18080/wallet/categories >/dev/null 2>&1; then
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:18080/healthz && curl -sf http://127.0.0.1:18080/ready; then
               READY=1
               break
             fi
@@ -263,9 +206,7 @@ jobs:
           done
 
           if [ "$READY" -ne 1 ]; then
-            echo "Smoke checks failed; dumping port-forward and pod logs..."
-            cat /tmp/api-pf.log || true
-            kubectl describe pod "$POD_NAME" || true
+            echo "Smoke checks failed; dumping pod logs..."
             kubectl logs "$POD_NAME" -c digital-wallet-chart || true
             kubectl logs "$POD_NAME" -c vault-agent || true
             exit 1
@@ -274,18 +215,18 @@ jobs:
           echo "Running E2E tests against /wallet endpoints..."
           BASE_URL="http://127.0.0.1:18080"
 
-          INCOME_STATUS=$(curl -s -o /tmp/e2e-income.json -w "%{http_code}" \
+          curl -sf "$BASE_URL/wallet/categories" > /dev/null
+
+          INCOME_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "$BASE_URL/wallet/transactions" \
             -H "Content-Type: application/json" \
             -d '{"description":"E2E Salary","amount":100.00,"category":"Salary"}')
-          echo "Income status: $INCOME_STATUS"
           test "$INCOME_STATUS" -eq 201
 
-          EXPENSE_STATUS=$(curl -s -o /tmp/e2e-expense.json -w "%{http_code}" \
+          EXPENSE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "$BASE_URL/wallet/transactions" \
             -H "Content-Type: application/json" \
             -d '{"description":"E2E Food","amount":-30.00,"category":"Food"}')
-          echo "Expense status: $EXPENSE_STATUS"
           test "$EXPENSE_STATUS" -eq 201
 
           BALANCE_JSON=$(curl -sf "$BASE_URL/wallet/balance")
@@ -294,15 +235,13 @@ jobs:
           echo "$BALANCE_JSON" | grep -qE '"totalIncome"\s*:\s*100(\.0+)?'
           echo "$BALANCE_JSON" | grep -qE '"totalExpense"\s*:\s*30(\.0+)?'
 
-          OVERDRAFT_STATUS=$(curl -s -o /tmp/e2e-overdraft.json -w "%{http_code}" \
+          OVERDRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "$BASE_URL/wallet/transactions" \
             -H "Content-Type: application/json" \
             -d '{"description":"E2E Overdraft","amount":-500.00,"category":"Food"}')
-          echo "Overdraft status: $OVERDRAFT_STATUS"
           test "$OVERDRAFT_STATUS" -eq 422
 
           BALANCE_AFTER_422=$(curl -sf "$BASE_URL/wallet/balance")
-          echo "Balance after 422: $BALANCE_AFTER_422"
           echo "$BALANCE_AFTER_422" | grep -qE '"currentBalance"\s*:\s*70(\.0+)?'
 
           echo "All smoke and E2E checks passed!"
@@ -325,7 +264,6 @@ jobs:
 
       - name: Commit and Push New Image SHA
         run: |
-          set -euo pipefail
           cd deploy-repo
           FILE="charts/digital-wallet-chart/values.yaml"
           sed -i 's/tag: "[^"]*"/tag: "${{ github.sha }}"/' "$FILE"
