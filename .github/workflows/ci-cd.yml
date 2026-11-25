@@ -132,8 +132,22 @@ jobs:
           kubectl run --rm -i vault-config --image=alpine:3.20 --restart=Never -- sh -c '
             set -eu
             apk add --no-cache curl jq >/dev/null
+          kubectl run --rm -i vault-config --image=alpine:3.20 --restart=Never -- sh -c '
+            set -eu
+            apk add --no-cache curl jq ca-certificates >/dev/null
+            KUBECTL_VER=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+            curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl
+            chmod +x /usr/local/bin/kubectl
             curl -fsSL https://raw.githubusercontent.com/Ivet1/digital-wallet-deploy/main/vault/bootstrap/configure-vault.sh -o /tmp/configure-vault.sh
             VAULT_ADDR=http://vault.default.svc:8200 VAULT_TOKEN=root ROLE_TTL=1h sh /tmp/configure-vault.sh
+          '
+
+          kubectl exec -i vault-0 -- sh -s << 'EOF_OUTER'
+          set -eu
+          export VAULT_ADDR=http://127.0.0.1:8200
+          export VAULT_TOKEN=root
+          vault kv put secret/digital-wallet/postgres password=smokepass123
+          EOF_OUTER
           '
 
           kubectl exec -i vault-0 -- sh -s << 'EOF_OUTER'
