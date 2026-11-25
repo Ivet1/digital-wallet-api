@@ -127,8 +127,26 @@ jobs:
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault-agent-injector --timeout=120s
 
           curl -fsSL https://raw.githubusercontent.com/Ivet1/digital-wallet-deploy/main/vault/bootstrap/configure-vault.sh -o /tmp/configure-vault.sh
-          kubectl exec -i vault-0 -- sh -c 'cat > /tmp/configure-vault.sh' < /tmp/configure-vault.sh
+          chmod +x /tmp/configure-vault.sh
+
+          kubectl port-forward svc/vault 8200:8200 >/tmp/pf-vault.log 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+          sleep 2
+
+          VAULT_ADDR=http://127.0.0.1:8200 \
+          VAULT_TOKEN=root \
+          ROLE_TTL=1h \
+          sh /tmp/configure-vault.sh
+
           rm -f /tmp/configure-vault.sh
+
+          kubectl exec -i vault-0 -- sh -s << 'EOF_OUTER'
+          set -eu
+          export VAULT_ADDR=http://127.0.0.1:8200
+          export VAULT_TOKEN=root
+          vault kv put secret/digital-wallet/postgres password=smokepass123
+          EOF_OUTER
           kubectl exec -i vault-0 -- sh -s << 'EOF_OUTER'
           set -eu
           export VAULT_ADDR=http://127.0.0.1:8200
