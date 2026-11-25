@@ -1,4 +1,3 @@
-
 using DigitalWallet.Api;
 using System.Globalization;
 using DigitalWallet.Api.Models;
@@ -29,18 +28,6 @@ if (!builder.Environment.IsDevelopment())
         throw new InvalidOperationException(
             "Vault connection string is empty.");
     }
-
-    // TEMPORARY DIAGNOSTICS - does NOT print the password.
-    var parsedConnection = new NpgsqlConnectionStringBuilder(connectionString);
-
-    Console.WriteLine("========== DATABASE DIAGNOSTICS ==========");
-    Console.WriteLine($"ENVIRONMENT: {builder.Environment.EnvironmentName}");
-    Console.WriteLine($"DB HOST: {parsedConnection.Host}");
-    Console.WriteLine($"DB PORT: {parsedConnection.Port}");
-    Console.WriteLine($"DB NAME: {parsedConnection.Database}");
-    Console.WriteLine($"DB USER: {parsedConnection.Username}");
-    Console.WriteLine($"DB PASSWORD LENGTH: {parsedConnection.Password?.Length ?? 0}");
-    Console.WriteLine("==========================================");
 }
 else
 {
