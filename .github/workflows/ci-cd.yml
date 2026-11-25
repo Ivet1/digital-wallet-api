@@ -126,28 +126,19 @@ jobs:
           kubectl rollout status deployment/vault-agent-injector --timeout=120s || true
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault-agent-injector --timeout=120s
 
-          kubectl exec vault-0 -- sh -c '
+          CFG_SCRIPT="$(curl -fsSL https://raw.githubusercontent.com/Ivet1/digital-wallet-deploy/main/vault/bootstrap/configure-vault.sh)"
+          kubectl exec -i vault-0 -- sh -c '
+            set -eu
             export VAULT_ADDR=http://127.0.0.1:8200
             export VAULT_TOKEN=root
-
+            export ROLE_TTL=1h
+            cat > /tmp/configure-vault.sh
+            sh /tmp/configure-vault.sh
+            rm -f /tmp/configure-vault.sh
             vault kv put secret/digital-wallet/postgres password=smokepass123
-
-            vault policy write digital-wallet-policy - <<EOF
-          path "secret/data/digital-wallet/postgres" {
-            capabilities = ["read"]
-          }
-          EOF
-
-            vault auth enable kubernetes || true
-            vault write auth/kubernetes/config \
-              kubernetes_host="https://kubernetes.default.svc:443"
-
-            vault write auth/kubernetes/role/digital-wallet-role \
-              bound_service_account_names=digital-wallet-app-digital-wallet-chart \
-              bound_service_account_namespaces=default \
-              policies=digital-wallet-policy \
-              ttl=1h
-          '
+          ' <<EOF_CFG
+$CFG_SCRIPT
+EOF_CFG
 
       - name: Install ServiceMonitor CRD & Deploy Digital Wallet Chart
         run: |
