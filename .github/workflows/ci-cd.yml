@@ -150,7 +150,7 @@ jobs:
               ttl=1h
           "
 
-      - name: Install ServiceMonitor CRD & Deploy Digital Wallet Chart
+      - name: Install Monitoring CRDs & Deploy Digital Wallet Chart
         run: |
           kubectl apply -f - <<'EOF'
           apiVersion: apiextensions.k8s.io/v1
@@ -164,6 +164,27 @@ jobs:
               listKind: ServiceMonitorList
               plural: servicemonitors
               singular: servicemonitor
+            scope: Namespaced
+            versions:
+              - name: v1
+                served: true
+                storage: true
+                schema:
+                  openAPIV3Schema:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+          ---
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            name: prometheusrules.monitoring.coreos.com
+          spec:
+            group: monitoring.coreos.com
+            names:
+              kind: PrometheusRule
+              listKind: PrometheusRuleList
+              plural: prometheusrules
+              singular: prometheusrule
             scope: Namespaced
             versions:
               - name: v1
